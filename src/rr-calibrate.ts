@@ -2,6 +2,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { type Manifest } from './types.ts';
 import { type SvgCanvas } from './app/svg-canvas.ts';
+import { Line as SvgLine } from '@svgdotjs/svg.js'; // Import SvgLine for type hinting
 
 
 @customElement('rr-calibrate')

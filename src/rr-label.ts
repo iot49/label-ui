@@ -3,6 +3,8 @@ import { customElement, property } from 'lit/decorators.js';
 import { type SvgCanvas } from './app/svg-canvas.ts';
 import { type Manifest } from './types.ts';
 import { getSymbolForTool } from './app/tool-symbols.ts';
+import { Use as SvgUse } from '@svgdotjs/svg.js'; // Import SvgUse for type hinting
+
 
 @customElement('rr-label')
 export class RrLabel extends LitElement {
@@ -34,7 +36,7 @@ export class RrLabel extends LitElement {
 
 
   @property({ attribute: false })
-  manifest: Manifest | null = null;
+  manifest!: Manifest;
 
   @property({ attribute: false })
   canvas: SvgCanvas | null = null;
@@ -141,8 +143,9 @@ export class RrLabel extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     this._removeEventListeners();
-    if (this.canvas) {
-      this.canvas.destroy();
-    }
+    // The canvas is now managed by rr-main, so we don't destroy it here.
+    // if (this.canvas) {
+    //   this.canvas.destroy();
+    // }
   }
 }

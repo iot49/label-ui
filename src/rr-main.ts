@@ -2,7 +2,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { saveAs } from 'file-saver';
 import { SCALE } from './config.ts';
-import { type Manifest } from './types.ts';
+import { type Manifest, type CanvasConfig, type SerializableSymbol, type SerializableLine } from './types.ts';
 import { SvgCanvas } from './app/svg-canvas.ts';
 import JSZip from 'jszip';
 import { TOOL_SYMBOLS } from './app/tool-symbols.ts';
@@ -14,13 +14,20 @@ export class RrMain extends LitElement {
   manifest: Manifest = { scale: SCALE, referenceLength: 1000 };
 
   @state()
-  canvas: SvgCanvas | null = null;
+  labelCanvas: SvgCanvas | null = null;
+
+  @state()
+  calibrateCanvas: SvgCanvas | null = null;
 
   @state()
   image: string | undefined = undefined;
 
   @state()
   activeTool: string | null = null;
+
+  // Collections for symbols and lines
+  private _currentSymbols: SerializableSymbol[] = [];
+  private _currentLines: SerializableLine[] = [];
 
   static styles = css`
     :host {
@@ -177,12 +184,12 @@ export class RrMain extends LitElement {
               ? html`<rr-label
                   .activeTool=${this.activeTool}
                   .manifest=${this.manifest}
-                  .canvas=${this.canvas}
+                  .canvas=${this.labelCanvas}
                 ></rr-label>`
               : html`<rr-calibrate
                   .imageUrl=${this.image}
                   .manifest=${this.manifest}
-                  .canvas=${this.canvas}
+                  .canvas=${this.calibrateCanvas}
                 ></rr-calibrate>`
             : html`<p>Please upload an image to begin.</p>`}
         </main>
@@ -201,15 +208,23 @@ export class RrMain extends LitElement {
   }
 
   private async _initializeCanvas(imageUrl: string) {
-    // Clean up existing canvas
-    if (this.canvas) {
-      this.canvas.destroy();
+    // Clean up existing canvases
+    if (this.labelCanvas) {
+      this.labelCanvas.destroy();
+    }
+    if (this.calibrateCanvas) {
+      this.calibrateCanvas.destroy();
     }
     
-    // Create new canvas instance
-    this.canvas = new SvgCanvas(imageUrl); // No container passed here
-    await this.canvas.initialize(imageUrl); // Pass imageUrl to initialize
-    this.canvas.initializeSymbols(Object.values(TOOL_SYMBOLS));
+    // Create new canvas instances with specific configurations
+    const labelConfig: CanvasConfig = { enableSymbols: true, enableLines: false };
+    this.labelCanvas = new SvgCanvas(imageUrl, labelConfig);
+    await this.labelCanvas.initialize(imageUrl);
+    this.labelCanvas.initializeSymbols(Object.values(TOOL_SYMBOLS));
+
+    const calibrateConfig: CanvasConfig = { enableSymbols: false, enableLines: true };
+    this.calibrateCanvas = new SvgCanvas(imageUrl, calibrateConfig);
+    await this.calibrateCanvas.initialize(imageUrl);
   }
 
   private _handleUploadClick() {
@@ -230,9 +245,33 @@ export class RrMain extends LitElement {
     const imageName = `image.${this.image.split(';')[0].split('/')[1]}`; // Extract extension from DataURL
     zip.file(imageName, this.image.split(',')[1], { base64: true });
 
-    // Add calibration lines to manifest if available
-    // TODO: add coordinates of lines and use elements from canvas
+    // Collect symbols and lines from their respective canvases
+    if (this.labelCanvas) {
+      this._currentSymbols = this.labelCanvas.getSymbolUses().map(use => ({
+        id: (use.attr('href') || use.attr('xlink:href')).replace('#', ''),
+        x: parseFloat(use.attr('data-original-x')),
+        y: parseFloat(use.attr('data-original-y')),
+      }));
+    }
+    if (this.calibrateCanvas) {
+      this._currentLines = this.calibrateCanvas.getLines().map(line => ({
+        p1: { x: parseFloat(line.attr('x1')), y: parseFloat(line.attr('y1')) },
+        p2: { x: parseFloat(line.attr('x2')), y: parseFloat(line.attr('y2')) },
+        color: line.attr('stroke'),
+      }));
+    }
+
+    // Update manifest with collected symbols and lines
+    this.manifest = {
+      ...this.manifest,
+      symbols: this._currentSymbols,
+      calibrationLines: this._currentLines,
+    };
+
     console.log('Preparing manifest for saving:', this.manifest);
+    console.log('Current Symbols:', this._currentSymbols);
+    console.log('Current Lines:', this._currentLines);
+
     zip.file('manifest.json', JSON.stringify(this.manifest, null, 2));
 
     const content = await zip.generateAsync({ type: 'blob' });
@@ -267,8 +306,24 @@ export class RrMain extends LitElement {
           if (imageDataUrl && manifestFileContent) {
             this.image = await imageDataUrl;
             const loadedManifest = JSON.parse(await manifestFileContent);
-            this.manifest = { ...this.manifest, ...loadedManifest, calibrationLines: loadedManifest.calibrationLines || [] };
+            this.manifest = { ...this.manifest, ...loadedManifest }; // Update manifest
+
             await this._initializeCanvas(this.image);
+
+            // Add symbols to labelCanvas
+            if (this.labelCanvas && loadedManifest.symbols) {
+              loadedManifest.symbols.forEach((s: SerializableSymbol) => {
+                this.labelCanvas!.addUse(s.id, s.x, s.y);
+              });
+            }
+
+            // Add lines to calibrateCanvas
+            if (this.calibrateCanvas && loadedManifest.calibrationLines) {
+              loadedManifest.calibrationLines.forEach((l: SerializableLine) => {
+                this.calibrateCanvas!.addLine(l.p1.x, l.p1.y, l.p2.x, l.p2.y, l.color);
+              });
+            }
+
             this.activeTool = 'calibrate';
           } else {
             console.error('Invalid .r49 file: missing image or manifest.json');
