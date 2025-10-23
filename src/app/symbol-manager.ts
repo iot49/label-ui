@@ -103,8 +103,8 @@ export class SymbolManager {
       startX = transformedStartPoint.x;
       startY = transformedStartPoint.y;
 
-      startElX = parseFloat(use.x().toString());
-      startElY = parseFloat(use.y().toString());
+      startElX = parseFloat(use.attr('data-original-x'));
+      startElY = parseFloat(use.attr('data-original-y'));
       e.preventDefault();
       e.stopPropagation();
       document.addEventListener('mousemove', onMouseMove);
@@ -127,10 +127,10 @@ export class SymbolManager {
       const newX = startElX + dx;
       const newY = startElY + dy;
 
-      use.move(newX, newY);
+      use.center(newX, newY); // Use center for positioning the symbol
       use.attr({ 'data-original-x': newX, 'data-original-y': newY });
-      dragHandle.center(newX + offsetX, newY + offsetY); // Keep offset consistent
-      dragInteraction.center(newX + offsetX, newY + offsetY); // Keep offset consistent
+      dragHandle.center(newX, newY); // Center drag handles directly on the symbol's center
+      dragInteraction.center(newX, newY); // Center drag handles directly on the symbol's center
     };
 
     const onMouseUp = () => {

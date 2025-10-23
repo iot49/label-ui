@@ -42,16 +42,14 @@ export class RrLabel extends LitElement {
   @property({ attribute: false })
   activeTool: string | null = null;
 
+  private _eventListeners: { type: string, listener: (e: any) => void }[] = [];
+
   render() {
     return html`
       <div class="canvas-container">
         ${this.canvas ? this.canvas.svgElement : html`<p>No canvas available for labeling.</p>`}
       </div>
     `;
-  }
-
-  firstUpdated() {
-    this._setupCanvasInteraction();
   }
 
   updated(changedProperties: Map<string | number | symbol, unknown>) {
@@ -61,27 +59,50 @@ export class RrLabel extends LitElement {
     }
   }
 
+  // BUG: after dragging a symbol, the drag handle "moves" from the center (correct) to the upper-left corner (wrong).
+  // I noticed a few places where an offset is applied, I've removed those but may have missed some. Or there could be another cause.
   private _setupCanvasInteraction() {
     if (!this.canvas || !this.canvas.svgElement) return;
 
-    // Ensure the SVG element is attached to the DOM before attaching event listeners
+    this._removeEventListeners(); // Clean up previous listeners
+
     const container = this.shadowRoot?.querySelector('.canvas-container');
     if (container && !container.contains(this.canvas.svgElement)) {
-      container.innerHTML = ''; // Clear previous content
+      container.innerHTML = '';
       container.appendChild(this.canvas.svgElement);
     }
 
-    // Attach click listener to the SVG element
-    this.canvas.svgElement.addEventListener('click', (e: MouseEvent) => {
+    let isDragging = false;
+    let dragStartTime = 0;
+
+    const onMouseDown = (e: MouseEvent) => {
+      isDragging = false;
+      dragStartTime = Date.now();
+    };
+
+    const onMouseMove = () => {
+      if (Date.now() - dragStartTime > 100) { // 100ms threshold
+        isDragging = true;
+      }
+    };
+
+    const onMouseUp = () => {
+      setTimeout(() => { isDragging = false; }, 10);
+    };
+
+    const onClick = (e: MouseEvent) => {
+      if (isDragging) {
+        console.log('[RrLabel] Click ignored - was dragging');
+        return;
+      }
+
       const target = e.target as Element;
       if (target && (target.tagName === 'circle' || target.classList.contains('symbol-instance'))) {
-        return; // Don't trigger if clicking on a handle or symbol itself
+        return;
       }
 
       const rect = this.canvas!.svgElement.getBoundingClientRect();
-      // BUG: fix typescript error
       const viewBox = this.canvas!.getViewbox();
-
       const svgX = ((e.clientX - rect.left) / rect.width) * viewBox.width;
       const svgY = ((e.clientY - rect.top) / rect.height) * viewBox.height;
 
@@ -91,14 +112,35 @@ export class RrLabel extends LitElement {
         const symbolConfig = getSymbolForTool(this.activeTool);
         if (symbolConfig) {
           this.canvas!.addUse(symbolConfig.id, svgX, svgY);
-          this.requestUpdate(); // Force re-render of rr-label
+          this.requestUpdate();
         }
       }
+    };
+
+    this._eventListeners = [
+      { type: 'mousedown', listener: onMouseDown },
+      { type: 'mousemove', listener: onMouseMove },
+      { type: 'mouseup', listener: onMouseUp },
+      { type: 'click', listener: onClick },
+    ];
+
+    this._eventListeners.forEach(({ type, listener }) => {
+      this.canvas!.svgElement.addEventListener(type, listener);
     });
+  }
+
+  private _removeEventListeners() {
+    if (this.canvas && this.canvas.svgElement) {
+      this._eventListeners.forEach(({ type, listener }) => {
+        this.canvas!.svgElement.removeEventListener(type, listener);
+      });
+    }
+    this._eventListeners = [];
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    this._removeEventListeners();
     if (this.canvas) {
       this.canvas.destroy();
     }
