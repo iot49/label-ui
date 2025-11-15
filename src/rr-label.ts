@@ -1,10 +1,7 @@
-import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
-import { type SvgCanvas } from './app/svg-canvas.ts';
-import { type Manifest } from './types.ts';
-import { getSymbolForTool } from './app/tool-symbols.ts';
-import { Use as SvgUse } from '@svgdotjs/svg.js'; // Import SvgUse for type hinting
-
+import { LitElement, html, css, svg } from 'lit';
+import { customElement, property, query, state } from 'lit/decorators.js';
+import { consume } from '@lit/context';
+import { Manifest, manifestContext } from './app/manifest.ts';
 
 @customElement('rr-label')
 export class RrLabel extends LitElement {
@@ -14,17 +11,8 @@ export class RrLabel extends LitElement {
       width: 100%;
       height: 100%;
     }
-    .canvas-container {
-      width: 100%;
-      height: calc(100vh - var(--rr-main-header-height, 3em) - 3px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      position: relative;
-      background-color: white;
-    }
-    .canvas-container svg {
+
+    svg {
       max-width: 100%;
       max-height: 100%;
       width: auto;
@@ -32,120 +20,130 @@ export class RrLabel extends LitElement {
       display: block;
       object-fit: contain;
     }
+
+    symbol {
+      overflow: visible;
+      stroke-width: 0.3;
+      cursor: pointer;
+    }
   `;
 
-
-  @property({ attribute: false })
+  @consume({ context: manifestContext, subscribe: true })
+  @state()
   manifest!: Manifest;
 
-  @property({ attribute: false })
-  canvas: SvgCanvas | null = null;
+  @property({ type: String })
+  imageUrl: string | null = null;
+
+  private dragHandleId: string | null = null;
 
   @property({ attribute: false })
   activeTool: string | null = null;
 
-  private _eventListeners: { type: string, listener: (e: any) => void }[] = [];
+  @query('#svg')
+  svg!: SVGGElement;
 
   render() {
+    // Calculate the SVG viewBox to match image dimensions
+    const imageWidth = this.manifest.image.pixelWidth;
+    const imageHeight = this.manifest.image.pixelHeight;
+    const viewBox = `0 0 ${imageWidth} ${imageHeight}`;
+
+    const symbolSize = 48;
+
     return html`
-      <div class="canvas-container">
-        ${this.canvas ? this.canvas.svgElement : html`<p>No canvas available for labeling.</p>`}
-      </div>
+      <svg id="svg" viewBox=${viewBox} @mousedown=${this.handleMouseDown} @mousemove=${this.handleMouseMove} @click=${this.handleClick}>
+        <defs>
+          <symbol id="label-track" width=${symbolSize} height=${symbolSize} viewBox="8 8 24 24" stroke="yellow">
+            <rect width="16" height="16" rx="3" ry="3" fill="white" fill-opacity="0.6" stroke="none" style="cursor: pointer;" />
+            <path
+              d="M11.303 6.584h1.064c.592 0 .936.334.936.844a.79.79 0 0 1-.485.748l.536 1.074h-.59l-.467-.994h-.473v.994h-.521zm.521.414v.861h.46c.292 0 .474-.14.474-.421 0-.286-.188-.44-.467-.44zm-8.771-.414h1.064c.592 0 .936.334.936.844 0 .39-.242.654-.485.748l.536 1.074h-.59l-.467-.994h-.473v.994h-.521zm.521.414v.861h.46c.292 0 .474-.14.474-.421 0-.286-.188-.44-.467-.44z"
+            />
+            <path
+              d="M6.95.435c.58-.58 1.52-.58 2.1 0l6.515 6.516c.58.58.58 1.519 0 2.098L9.05 15.565c-.58.58-1.519.58-2.098 0L.435 9.05a1.48 1.48 0 0 1 0-2.098zm1.4.7a.495.495 0 0 0-.7 0L4.923 3.861 8 6.939l3.078-3.077L8.35 1.134Zm3.788 3.788L9.061 8l3.077 3.078 2.728-2.728a.495.495 0 0 0 0-.7zm-1.06 7.215L8 9.061l-3.077 3.077 2.727 2.728a.495.495 0 0 0 .7 0zm-7.216-1.06L6.939 8 3.862 4.923 1.134 7.65a.495.495 0 0 0 0 .7z"
+            />
+          </symbol>
+          <symbol id="label-train" width=${symbolSize} height=${symbolSize} viewBox="8 8 24 24" stroke="red">
+            <rect width="16" height="16" rx="3" ry="3" fill="white" fill-opacity="0.6" stroke="none" style="cursor: pointer;" />
+            <path
+              d="M5 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0m8 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0m-6-1a1 1 0 1 0 0 2h2a1 1 0 1 0 0-2zM4 2a1 1 0 0 0-1 1v3.9c0 .625.562 1.092 1.17.994C5.075 7.747 6.792 7.5 8 7.5s2.925.247 3.83.394A1.008 1.008 0 0 0 13 6.9V3a1 1 0 0 0-1-1zm0 1h8v3.9q0 .002 0 0l-.002.004-.005.002h-.004C11.088 6.761 9.299 6.5 8 6.5s-3.088.26-3.99.406h-.003l-.005-.002L4 6.9q0 .002 0 0z"
+            />
+            <path
+              d="M1 2.5A2.5 2.5 0 0 1 3.5 0h9A2.5 2.5 0 0 1 15 2.5v9c0 .818-.393 1.544-1 2v2a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1-.5-.5V14H5v1.5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1-.5-.5v-2a2.5 2.5 0 0 1-1-2zM3.5 1A1.5 1.5 0 0 0 2 2.5v9A1.5 1.5 0 0 0 3.5 13h9a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 12.5 1z"
+            />
+          </symbol>
+          <symbol id="label-train-end" width=${symbolSize} height=${symbolSize} viewBox="8 8 24 24" stroke="cyan">
+            <rect width="16" height="16" rx="3" ry="3" fill="white" fill-opacity="0.6" stroke="none" style="cursor: pointer;" />
+            <path
+              fill-rule="evenodd"
+              d="M6 8a.5.5 0 0 0 .5.5h5.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708.708L12.293 7.5H6.5A.5.5 0 0 0 6 8m-2.5 7a.5.5 0 0 1-.5-.5v-13a.5.5 0 0 1 1 0v13a.5.5 0 0 1-.5.5"
+            />
+          </symbol>
+          <symbol id="label-coupling" width=${symbolSize} height=${symbolSize} viewBox="8 8 24 24" stroke="lightgreen">
+            <rect width="16" height="16" rx="3" ry="3" fill="white" fill-opacity="0.6" stroke="none" style="cursor: pointer;" />
+            <path
+              d="M8 15a.5.5 0 0 1-.5-.5v-13a.5.5 0 0 1 1 0v13a.5.5 0 0 1-.5.5M0 8a.5.5 0 0 1 .5-.5h3.793L3.146 6.354a.5.5 0 1 1 .708-.708l2 2a.5.5 0 0 1 0 .708l-2 2a.5.5 0 0 1-.708-.708L4.293 8.5H.5A.5.5 0 0 1 0 8m11.707.5 1.147 1.146a.5.5 0 0 1-.708.708l-2-2a.5.5 0 0 1 0-.708l2-2a.5.5 0 0 1 .708.708L11.707 7.5H15.5a.5.5 0 0 1 0 1z"
+            />
+          </symbol>
+        </defs>
+        <image id="image" href=${this.imageUrl} x="0" y="0" width=${imageWidth} height=${imageHeight}></image>
+        ${this.markerTemplate()}
+      </svg>
     `;
   }
 
-  updated(changedProperties: Map<string | number | symbol, unknown>) {
-    super.updated(changedProperties);
-    if (changedProperties.has('canvas') && this.canvas) {
-      this._setupCanvasInteraction();
+  private markerTemplate() {
+    return svg`
+      ${Object.entries(this.manifest.markers).map(([markerId, pos]) => {
+        const lastDash = markerId.lastIndexOf('-');
+        if (lastDash < 0 || !markerId.startsWith('label-')) return svg``;
+        const href = markerId.slice(0, lastDash);
+        return svg`<use id=${markerId} href="#${href}" x=${pos.x} y=${pos.y}></use>`;
+      })}
+    `;
+  }
+
+  private toSVGPoint(x: number, y: number) {
+    const p = new DOMPoint(x, y);
+    const ctm = this.svg.getScreenCTM();
+    if (!ctm) {
+      throw new Error('Unable to get screen CTM from SVG element');
     }
+    return p.matrixTransform(ctm.inverse());
   }
 
-  // BUG: after dragging a symbol, the drag handle "moves" from the center (correct) to the upper-left corner (wrong).
-  // I noticed a few places where an offset is applied, I've removed those but may have missed some. Or there could be another cause.
-  private _setupCanvasInteraction() {
-    if (!this.canvas || !this.canvas.svgElement) return;
-
-    this._removeEventListeners(); // Clean up previous listeners
-
-    const container = this.shadowRoot?.querySelector('.canvas-container');
-    if (container && !container.contains(this.canvas.svgElement)) {
-      container.innerHTML = '';
-      container.appendChild(this.canvas.svgElement);
+  private handleClick = (event: MouseEvent) => {
+    // do not create label after dragging
+    if (this.dragHandleId === null) {
+      // create a new label
+      if (!this.activeTool) return;
+      const markers = this.manifest.markers;
+      let id = this.activeTool;
+      for (let i = Object.keys(markers).length; i++; ) {
+        id = `${this.activeTool}-${i}`;
+        if (!(id in markers)) break;
+      }
+      const screenCoords = this.toSVGPoint(event.clientX, event.clientY);
+      this.manifest.setMarker(id, screenCoords.x, screenCoords.y);
+    } else {
+      // finished dragging
+      this.dragHandleId = null;
     }
+  };
 
-    let isDragging = false;
-    let dragStartTime = 0;
-
-    const onMouseDown = (e: MouseEvent) => {
-      isDragging = false;
-      dragStartTime = Date.now();
-    };
-
-    const onMouseMove = () => {
-      if (Date.now() - dragStartTime > 100) { // 100ms threshold
-        isDragging = true;
-      }
-    };
-
-    const onMouseUp = () => {
-      setTimeout(() => { isDragging = false; }, 10);
-    };
-
-    const onClick = (e: MouseEvent) => {
-      if (isDragging) {
-        console.log('[RrLabel] Click ignored - was dragging');
-        return;
-      }
-
-      const target = e.target as Element;
-      if (target && (target.tagName === 'circle' || target.classList.contains('symbol-instance'))) {
-        return;
-      }
-
-      const rect = this.canvas!.svgElement.getBoundingClientRect();
-      const viewBox = this.canvas!.getViewbox();
-      const svgX = ((e.clientX - rect.left) / rect.width) * viewBox.width;
-      const svgY = ((e.clientY - rect.top) / rect.height) * viewBox.height;
-
-      console.log('[RrLabel] SVG click coordinates:', { svgX, svgY, activeTool: this.activeTool });
-
-      if (this.activeTool) {
-        const symbolConfig = getSymbolForTool(this.activeTool);
-        if (symbolConfig) {
-          this.canvas!.addUse(symbolConfig.id, svgX, svgY);
-          this.requestUpdate();
-        }
-      }
-    };
-
-    this._eventListeners = [
-      { type: 'mousedown', listener: onMouseDown },
-      { type: 'mousemove', listener: onMouseMove },
-      { type: 'mouseup', listener: onMouseUp },
-      { type: 'click', listener: onClick },
-    ];
-
-    this._eventListeners.forEach(({ type, listener }) => {
-      this.canvas!.svgElement.addEventListener(type, listener);
-    });
-  }
-
-  private _removeEventListeners() {
-    if (this.canvas && this.canvas.svgElement) {
-      this._eventListeners.forEach(({ type, listener }) => {
-        this.canvas!.svgElement.removeEventListener(type, listener);
-      });
+  private handleMouseDown = (event: MouseEvent) => {
+    const target = event.target as Element;
+    if (!target || !target.id || !(target.id in this.manifest.markers)) return;
+    if (this.activeTool === 'delete') {
+      this.manifest.deleteMarker(target.id);
+    } else {
+      this.dragHandleId = target.id;
     }
-    this._eventListeners = [];
-  }
+  };
 
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    this._removeEventListeners();
-    // The canvas is now managed by rr-main, so we don't destroy it here.
-    // if (this.canvas) {
-    //   this.canvas.destroy();
-    // }
-  }
+  private handleMouseMove = (event: MouseEvent) => {
+    if (!this.dragHandleId) return;
+    const screenCoords = this.toSVGPoint(event.clientX, event.clientY);
+    this.manifest.setMarker(this.dragHandleId, screenCoords.x, screenCoords.y);
+  };
 }

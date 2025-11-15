@@ -1,33 +1,41 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
+import { provide } from '@lit/context';
 import { saveAs } from 'file-saver';
-import { SCALE } from './config.ts';
-import { type Manifest, type CanvasConfig, type SerializableSymbol, type SerializableLine } from './types.ts';
-import { SvgCanvas } from './app/svg-canvas.ts';
+import { Manifest, manifestContext } from './app/manifest.ts';
 import JSZip from 'jszip';
-import { TOOL_SYMBOLS } from './app/tool-symbols.ts';
 
+/*
+Set up "page" & delegate to the appropriate component based on state:
+- header with title
+- toolbar with buttons for upload, calibrate, save, and tools
+- main area with either rr-calibrate or rr-label based on active tool
+
+Provides context Manifest
+*/
 
 @customElement('rr-main')
 export class RrMain extends LitElement {
+  @provide({ context: manifestContext })
   @state()
-  manifest: Manifest = { scale: SCALE, referenceLength: 1000 };
+  private _manifest: Manifest = new Manifest();
+
+  get manifest(): Manifest {
+    return this._manifest;
+  }
+
+  set manifest(newManifest: Manifest) {
+    // Use a setter to reattach event listener to new manifest instance
+    if (this._manifest) this._manifest.removeEventListener('rr-manifest-changed', this._handleManifestDataChanged);
+    this._manifest = newManifest;
+    this._manifest.addEventListener('rr-manifest-changed', this._handleManifestDataChanged);
+  }
 
   @state()
-  labelCanvas: SvgCanvas | null = null;
-
-  @state()
-  calibrateCanvas: SvgCanvas | null = null;
-
-  @state()
-  image: string | undefined = undefined;
+  imageUrl: string | undefined = undefined;
 
   @state()
   activeTool: string | null = null;
-
-  // Collections for symbols and lines
-  private _currentSymbols: SerializableSymbol[] = [];
-  private _currentLines: SerializableLine[] = [];
 
   static styles = css`
     :host {
@@ -35,7 +43,6 @@ export class RrMain extends LitElement {
       flex-direction: column;
       height: 100vh;
       font-family: sans-serif;
-
     }
 
     header {
@@ -44,10 +51,17 @@ export class RrMain extends LitElement {
       color: var(--sl-color-neutral-0);
       display: flex;
       align-items: center;
+      justify-content: space-between;
       padding: 0 1em;
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       font-weight: bold;
       font-size: 2em;
+    }
+
+    .right-align {
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
     }
 
     .container {
@@ -85,261 +99,221 @@ export class RrMain extends LitElement {
       flex-grow: 1;
       padding: 0;
     }
+
+    .header-text {
+      color: var(--sl-color-neutral-0);
+      font-family: var(--sl-font-sans);
+      font-size: var(--sl-font-size-medium);
+      font-weight: var(--sl-font-weight-normal);
+      line-height: var(--sl-line-height-normal);
+      display: inline-flex;
+      align-items: center;
+      height: var(--sl-input-height-medium);
+    }
   `;
 
-  render() {
-    return html`
-      <header>
-        <slot name="title">Main</slot>
-      </header>
-      <div class="container">
-        <nav>
-          <div class="toolbar-group">
-            <sl-tooltip content="Upload Image">
-              <sl-icon-button
-                name="upload"
-                label="Upload"
-                style="font-size: 2em; color: white;"
-                @click=${this._handleUploadClick}
-                ?disabled=${false}
-              ></sl-icon-button>
-            </sl-tooltip>
-            <sl-tooltip content="Calibrate Image">
-              <sl-icon-button
-                name="fullscreen"
-                label="Calibrate"
-                style="font-size: 2em; color: white;"
-                @click=${this._activateCalibrateTool}
-                ?disabled=${this.image === undefined}
-                class=${this.activeTool === 'calibrate' ? 'active-tool' : ''}
-              ></sl-icon-button>
-            </sl-tooltip>
-            <sl-tooltip content="Save Image">
-              <sl-icon-button
-                name="save"
-                label="Save"
-                style="font-size: 2em; color: white;"
-                @click=${this._handleSaveClick}
-                ?disabled=${this.image === undefined}
-              ></sl-icon-button>
-            </sl-tooltip>
-          </div>
+  connectedCallback() {
+    super.connectedCallback();
+    // Ensure the initial manifest has the event listener attached
+    this._manifest.addEventListener('rr-manifest-changed', this._handleManifestDataChanged);
+  }
 
-          <div class="toolbar-group">
-            <sl-tooltip content="Predict">
-              <sl-icon-button
-                name="question-circle"
-                label="Predict"
-                style="font-size: 2em; color: white;"
-                @click=${() => this._activateLabelingTool('predict')}
-                ?disabled=${this.image === undefined}
-                class=${this.activeTool === 'predict' ? 'active-tool' : ''}
-              ></sl-icon-button>
-            </sl-tooltip>
-            <sl-tooltip content="Track">
-              <sl-icon-button
-                name="sign-railroad"
-                label="Track"
-                style="font-size: 2em; color: white;"
-                @click=${() => this._activateLabelingTool('track')}
-                ?disabled=${this.image === undefined}
-                class=${this.activeTool === 'track' ? 'active-tool' : ''}
-              ></sl-icon-button>
-            </sl-tooltip>
-            <sl-tooltip content="Train">
-              <sl-icon-button
-                name="truck-front"
-                label="Car"
-                style="font-size: 2em; color: white;"
-                @click=${() => this._activateLabelingTool('train')}
-                ?disabled=${this.image === undefined}
-                class=${this.activeTool === 'train' ? 'active-tool' : ''}
-              ></sl-icon-button>
-            </sl-tooltip>
-            <sl-tooltip content="Train Front/Back">
-              <sl-icon-button
-                name="arrow-bar-right"
-                label="Train Front/End"
-                style="font-size: 2em; color: white;"
-                @click=${() => this._activateLabelingTool('train-end')}
-                ?disabled=${this.image === undefined}
-                class=${this.activeTool === 'train-end' ? 'active-tool' : ''}
-              ></sl-icon-button>
-            </sl-tooltip>
-            <sl-tooltip content="Train Coupling">
-              <sl-icon-button
-                name="arrows-collapse-vertical"
-                label="Coupling"
-                style="font-size: 2em; color: white;"
-                @click=${() => this._activateLabelingTool('coupling')}
-                ?disabled=${this.image === undefined}
-                class=${this.activeTool === 'coupling' ? 'active-tool' : ''}
-              ></sl-icon-button>
-            </sl-tooltip>
-          </div>
-        </nav>
-        <main>
-          ${this.image
-            ? this.activeTool && this.activeTool !== 'calibrate'
-              ? html`<rr-label
-                  .activeTool=${this.activeTool}
-                  .manifest=${this.manifest}
-                  .canvas=${this.labelCanvas}
-                ></rr-label>`
-              : html`<rr-calibrate
-                  .imageUrl=${this.image}
-                  .manifest=${this.manifest}
-                  .canvas=${this.calibrateCanvas}
-                ></rr-calibrate>`
-            : html`<p>Please upload an image to begin.</p>`}
-        </main>
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    // Event listener cleanup is handled automatically via the manifest setter
+    if (this._manifest) {
+      this._manifest.removeEventListener('rr-manifest-changed', this._handleManifestDataChanged);
+    }
+  }
+
+  private _handleManifestDataChanged = (event: Event) => {
+    // Update the provided context data with the new data from the event
+    this.manifest = new Manifest((event as CustomEvent).detail);
+  };
+
+  private _fileToolsTemplate() {
+    return html`
+      <div class="toolbar-group">
+        ${this._renderToolButton('Upload Image', 'folder2-open', 'open', false)}
+        ${this._renderToolButton('Calibrate Image', 'fullscreen', 'calibrate', this.imageUrl === undefined)}
+        ${this._renderToolButton('Save Image', 'floppy', 'save', this.imageUrl === undefined)}
       </div>
     `;
   }
 
-  private _activateLabelingTool(tool: string) {
-    this.activeTool = tool;
-    console.log(`Activated labeling tool: ${tool}`);
+  private _labelToolsTemplate() {
+    const disabled = this.imageUrl === undefined || this.manifest.layout.size.width === undefined || this.manifest.layout.size.height === undefined;
+    return html` <div class="toolbar-group">
+      ${this._renderToolButton('Predict Occupancy', 'question-circle', 'label-predict', disabled)}
+      ${this._renderToolButton('Label as Track', 'sign-railroad', 'label-track', disabled)}
+      ${this._renderToolButton('Label as Train Car', 'truck-front', 'label-train', disabled)}
+      ${this._renderToolButton('Label as Train Front/Back', 'arrow-bar-right', 'label-train-end', disabled)}
+      ${this._renderToolButton('Label as Train Coupling', 'arrows-collapse-vertical', 'label-coupling', disabled)}
+      ${this._renderToolButton('Delete Label', 'trash3', 'delete', disabled)}
+    </div>`;
   }
 
-  private _activateCalibrateTool() {
-    this.activeTool = 'calibrate';
-    console.log('Activated calibrate tool');
+  private _headerTemplate() {
+    return html`
+      <div class="left-align">Rail49</div>
+      <div class="right-align">
+        <span class="header-text"> ${this.manifest.layout.name} </span>
+        <span class="header-text"> ${this.manifest.layout.scale} </span>
+        ${this.manifest.layout.size.width && this.manifest.layout.size.height
+          ? html`<span class="header-text"> ${this.manifest.layout.size.width} x ${this.manifest.layout.size.height} mm </span>`
+          : html``}
+        <sl-icon-button
+          name="gear"
+          label="Settings"
+          style="font-size: 1.5rem; color: var(--sl-color-neutral-0)"
+          @click=${this._handleSettingsClick}
+          ?disabled=${this.imageUrl === undefined}
+        ></sl-icon-button>
+      </div>
+    `;
   }
 
-  private async _initializeCanvas(imageUrl: string) {
-    // Clean up existing canvases
-    if (this.labelCanvas) {
-      this.labelCanvas.destroy();
-    }
-    if (this.calibrateCanvas) {
-      this.calibrateCanvas.destroy();
-    }
-    
-    // Create new canvas instances with specific configurations
-    const labelConfig: CanvasConfig = { enableSymbols: true, enableLines: false };
-    this.labelCanvas = new SvgCanvas(imageUrl, labelConfig);
-    await this.labelCanvas.initialize(imageUrl);
-    this.labelCanvas.initializeSymbols(Object.values(TOOL_SYMBOLS));
-
-    const calibrateConfig: CanvasConfig = { enableSymbols: false, enableLines: true };
-    this.calibrateCanvas = new SvgCanvas(imageUrl, calibrateConfig);
-    await this.calibrateCanvas.initialize(imageUrl);
+  render() {
+    return html`
+      <header>
+        <slot name="title">${this._headerTemplate()}</slot>
+      </header>
+      <div class="container">
+        <nav>${this._fileToolsTemplate()} ${this._labelToolsTemplate()}</nav>
+        <main>
+          ${this.imageUrl
+            ? this.activeTool && this.activeTool !== 'calibrate'
+              ? html`<rr-label .imageUrl=${this.imageUrl} .activeTool=${this.activeTool}></rr-label>`
+              : html`<rr-calibrate .imageUrl=${this.imageUrl}></rr-calibrate>`
+            : html`<p>&nbsp;&nbsp;&nbsp;Please upload an image or open a <em>.r49</em> file.</p>`}
+        </main>
+      </div>
+      ${this._settingsDialogTemplate()}
+    `;
   }
 
-  private _handleUploadClick() {
-    this.activeTool = null; // Clear active tool when uploading new image
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/jpeg, image/png, .r49';
-    input.onchange = this._handleChooseFile.bind(this);
-    input.click();
+  private _renderToolButton(toolTip: string, name: string, id: string, disabled: boolean) {
+    return html`
+      <sl-tooltip content=${toolTip}>
+        <sl-icon-button
+          name=${name}
+          style="font-size: 2em; color: white;"
+          @click=${() => this._handleToolClick(id)}
+          ?disabled=${disabled}
+          class=${this.activeTool === id ? 'active-tool' : ''}
+        ></sl-icon-button>
+      </sl-tooltip>
+    `;
   }
 
-  private async _handleSaveClick() {
-    if (!this.image) {
-      return;
-    }
+  private async _handleToolClick(toolId: string) {
+    switch (toolId) {
+      case 'open': {
+        this.activeTool = null; // Clear active tool when uploading new image
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.r49, image/jpeg, image/png';
+        input.onchange = this._handleChooseFile.bind(this);
+        input.click();
+        break;
+      }
+      case 'save': {
+        if (!this.imageUrl) return;
 
-    const zip = new JSZip();
-    const imageName = `image.${this.image.split(';')[0].split('/')[1]}`; // Extract extension from DataURL
-    zip.file(imageName, this.image.split(',')[1], { base64: true });
+        const zip = new JSZip();
+        // create image file
+        const mimeType = this.imageUrl.split(';')[0].split(':')[1]; // Gets "image/jpeg"
+        const extension = mimeType.split('/')[1]; // Gets "jpeg"
+        const imageName = `image.${extension}`;
+        zip.file(imageName, this.imageUrl.split(',')[1], { base64: true });
 
-    // Collect symbols and lines from their respective canvases
-    if (this.labelCanvas) {
-      this._currentSymbols = this.labelCanvas.getSymbolUses().map(use => ({
-        id: (use.attr('href') || use.attr('xlink:href')).replace('#', ''),
-        x: parseFloat(use.attr('data-original-x')),
-        y: parseFloat(use.attr('data-original-y')),
-      }));
-    }
-    if (this.calibrateCanvas) {
-      this._currentLines = this.calibrateCanvas.getLines().map(line => ({
-        p1: { x: parseFloat(line.attr('x1')), y: parseFloat(line.attr('y1')) },
-        p2: { x: parseFloat(line.attr('x2')), y: parseFloat(line.attr('y2')) },
-        color: line.attr('stroke'),
-      }));
-    }
+        // create manifest.json
+        zip.file('manifest.json', this.manifest.toJSON());
 
-    // Update manifest with collected symbols and lines
-    this.manifest = {
-      ...this.manifest,
-      symbols: this._currentSymbols,
-      calibrationLines: this._currentLines,
+        // save .r49
+        const content = await zip.generateAsync({ type: 'blob' });
+        saveAs(content, `${this.manifest.layout.name}.r49`);
+        break;
+      }
+      default: {
+        this.activeTool = toolId;
+        break;
+      }
+    }
+  }
+
+  private _load_r49(file: File) {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const zip = await JSZip.loadAsync(e.target?.result as ArrayBuffer);
+      let imageDataUrl: Promise<string> | undefined;
+      let manifestFileContent: Promise<string> | undefined;
+
+      // read image and manifest ...
+      zip.forEach((relativePath, zipEntry) => {
+        if (relativePath.startsWith('image.')) {
+          // Extract extension from filename (e.g., "image.jpeg" -> "jpeg")
+          const extension = relativePath.split('.').slice(1).join('.');
+          imageDataUrl = zipEntry.async('base64').then((data) => {
+            const mimeType = `image/${extension}`;
+            return `data:${mimeType};base64,${data}`;
+          });
+        } else if (relativePath === 'manifest.json') {
+          manifestFileContent = zipEntry.async('string');
+        }
+      });
+
+      // update imageUrl & manifest
+      if (imageDataUrl && manifestFileContent) {
+        this.imageUrl = await imageDataUrl;
+        this.manifest = Manifest.fromJSON(await manifestFileContent);
+      } else {
+        console.error('Invalid .r49 file: missing image or manifest.json');
+      }
     };
+    reader.readAsArrayBuffer(file);
+  }
 
-    console.log('Preparing manifest for saving:', this.manifest);
-    console.log('Current Symbols:', this._currentSymbols);
-    console.log('Current Lines:', this._currentLines);
+  private _load_imgfile(file: File) {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const name = file.name.substring(0, file.name.lastIndexOf('.'));
+      // layout name defaults to file name
+      this.manifest.setLayout({ ...this.manifest.layout, name });
+      this.imageUrl = e.target?.result as string;
 
-    zip.file('manifest.json', JSON.stringify(this.manifest, null, 2));
-
-    const content = await zip.generateAsync({ type: 'blob' });
-    // TODO: use name of uploaded file if available
-    saveAs(content, 'railroad.r49');
+      // Create an Image object to get actual dimensions
+      const img = new Image();
+      img.onload = () => {
+        this.manifest.setImageDimensions(img.width, img.height);
+      };
+      img.src = this.imageUrl;
+    };
+    reader.readAsDataURL(file);
   }
 
   private _handleChooseFile(event: Event) {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files.length > 0) {
       const file = input.files[0];
-
-      if (file.name.endsWith('.r49')) {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          const zip = await JSZip.loadAsync(e.target?.result as ArrayBuffer);
-          let imageDataUrl: Promise<string> | undefined;
-          let manifestFileContent: Promise<string> | undefined;
-
-          zip.forEach((relativePath, zipEntry) => {
-            if (relativePath.startsWith('image.')) {
-              // Assuming the image file starts with 'image.'
-              imageDataUrl = zipEntry.async('base64').then((data) => {
-                const mimeType = `image/${relativePath.split('.')[1]}`;
-                return `data:${mimeType};base64,${data}`;
-              });
-            } else if (relativePath === 'manifest.json') {
-              manifestFileContent = zipEntry.async('string');
-            }
-          });
-
-          if (imageDataUrl && manifestFileContent) {
-            this.image = await imageDataUrl;
-            const loadedManifest = JSON.parse(await manifestFileContent);
-            this.manifest = { ...this.manifest, ...loadedManifest }; // Update manifest
-
-            await this._initializeCanvas(this.image);
-
-            // Add symbols to labelCanvas
-            if (this.labelCanvas && loadedManifest.symbols) {
-              loadedManifest.symbols.forEach((s: SerializableSymbol) => {
-                this.labelCanvas!.addUse(s.id, s.x, s.y);
-              });
-            }
-
-            // Add lines to calibrateCanvas
-            if (this.calibrateCanvas && loadedManifest.calibrationLines) {
-              loadedManifest.calibrationLines.forEach((l: SerializableLine) => {
-                this.calibrateCanvas!.addLine(l.p1.x, l.p1.y, l.p2.x, l.p2.y, l.color);
-              });
-            }
-
-            this.activeTool = 'calibrate';
-          } else {
-            console.error('Invalid .r49 file: missing image or manifest.json');
-            // Optionally, show an error message to the user
-          }
-        };
-        reader.readAsArrayBuffer(file);
-      } else {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          this.image = e.target?.result as string;
-          await this._initializeCanvas(this.image);
-          this.activeTool = 'calibrate'; // Activate calibrate tool visually
-        };
-        reader.readAsDataURL(file);
-      }
+      file.name.endsWith('.r49') ? this._load_r49(file) : this._load_imgfile(file);
+      // Activate calibrate tool visually
+      this.activeTool = 'calibrate';
     }
+  }
+
+  private _handleSettingsClick() {
+    const dialog = this.shadowRoot?.querySelector('sl-dialog') as any;
+    if (dialog) {
+      dialog.show();
+    }
+  }
+
+  private _settingsDialogTemplate() {
+    return html`
+      <sl-dialog label="Layout">
+        <rr-settings></rr-settings>
+      </sl-dialog>
+    `;
   }
 }
