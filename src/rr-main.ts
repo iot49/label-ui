@@ -144,11 +144,11 @@ export class RrMain extends LitElement {
   private _labelToolsTemplate() {
     const disabled = this.imageUrl === undefined || this.manifest.layout.size.width === undefined || this.manifest.layout.size.height === undefined;
     return html` <div class="toolbar-group">
-      ${this._renderToolButton('Predict Occupancy', 'question-circle', 'label-predict', disabled)}
-      ${this._renderToolButton('Label as Track', 'sign-railroad', 'label-track', disabled)}
-      ${this._renderToolButton('Label as Train Car', 'truck-front', 'label-train', disabled)}
-      ${this._renderToolButton('Label as Train Front/Back', 'arrow-bar-right', 'label-train-end', disabled)}
-      ${this._renderToolButton('Label as Train Coupling', 'arrows-collapse-vertical', 'label-coupling', disabled)}
+      ${this._renderToolButton('Detect Occupancy', 'question-circle', 'detector', disabled)}
+      ${this._renderToolButton('Label as Track', 'sign-railroad', 'track', disabled)}
+      ${this._renderToolButton('Label as Train Car', 'truck-front', 'train', disabled)}
+      ${this._renderToolButton('Label as Train Front/Back', 'arrow-bar-right', 'train-end', disabled)}
+      ${this._renderToolButton('Label as Train Coupling', 'arrows-collapse-vertical', 'coupling', disabled)}
       ${this._renderToolButton('Delete Label', 'trash3', 'delete', disabled)}
     </div>`;
   }
@@ -232,7 +232,9 @@ export class RrMain extends LitElement {
 
         // save .r49
         const content = await zip.generateAsync({ type: 'blob' });
-        saveAs(content, `${this.manifest.layout.name}.r49`);
+        const filename = `${this.manifest.layout.name}.r49`;
+        console.log("save", filename, this.manifest.toJSON());
+        saveAs(content, filename);
         break;
       }
       default: {
@@ -277,8 +279,15 @@ export class RrMain extends LitElement {
   private _load_imgfile(file: File) {
     const reader = new FileReader();
     reader.onload = async (e) => {
-      const name = file.name.substring(0, file.name.lastIndexOf('.'));
+      // when labeleing, frequently multiple images with identical dimensions are loaded
+      // hence we keep existing values (that still may apply) in manifest, updating only those that clearly need change
+
+      // labels do not apply to different image (modification is not responsive, but name change below is)
+      this.manifest.markers["detector"] = {};
+      this.manifest.markers["label"] = {};
+
       // layout name defaults to file name
+      const name = file.name.substring(0, file.name.lastIndexOf('.'));
       this.manifest.setLayout({ ...this.manifest.layout, name });
       this.imageUrl = e.target?.result as string;
 

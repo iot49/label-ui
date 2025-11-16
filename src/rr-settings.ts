@@ -50,7 +50,7 @@ export class RrSettings extends LitElement {
       <div class="settings-row">
         <div class="settings-label">Name:</div>
         <div class="settings-field">
-          <sl-input value=${this.manifest.layout.name} @sl-input=${this._handleLayoutNameChange}> </sl-input>
+          <sl-input value=${this.manifest.layout.name || ""} @sl-input=${this._handleLayoutNameChange}> </sl-input>
         </div>
       </div>
       <div class="settings-row">
@@ -97,7 +97,7 @@ export class RrSettings extends LitElement {
     const width = parseFloat(input.value) || 0;
 
     // estimate height from image aspect ratio (if not set by user)
-    const aspect_ratio = this.manifest.image.pixelHeight / this.manifest.image.pixelWidth;
+    const aspect_ratio = this.manifest.camera.resolution.height / this.manifest.camera.resolution.width;
     const height = this.manifest.layout.size.height ? this.manifest.layout.size.height : Math.round(width * aspect_ratio);
     
     this.manifest.setLayout({

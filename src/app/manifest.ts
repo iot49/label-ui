@@ -5,15 +5,26 @@ export const manifestContext = createContext<Manifest>('manifest');
 export interface ManifestData {
   version: number;
   layout: Layout;
-  image: { pixelWidth: number; pixelHeight: number };
-  markers: Record<string, Marker>;
+  camera: Camera;
+  markers: Markers;
 }
 
 export interface Layout {
   name: string | undefined;
   scale: ValidScales;
   size: { width: number | undefined; height: number | undefined }; // in mm
+  description?: string;
+  contact?: string;
 }
+
+export interface Camera {
+  resolution: { width: number; height: number };
+  model?: string;
+}
+
+export type MarkerCategory = "calibration" | "detector" | "label";
+export type MarkerId = string;
+export type Markers = Record<MarkerCategory, Record<string, Marker>>;
 
 export interface Marker {
   x: number;
@@ -42,8 +53,8 @@ export class Manifest extends EventTarget {
     this._data = {
       version: 1,
       layout: { name: undefined, scale: 'HO', size: { width: undefined, height: undefined } },
-      image: { pixelWidth: 0, pixelHeight: 0 },
-      markers: {},
+      camera: { resolution: { width: 0, height: 0 } },
+      markers: { calibration: {}, detector: {}, label: {} },
     };
 
     if (data) this._data = { ...this._data, ...data };
@@ -55,8 +66,8 @@ export class Manifest extends EventTarget {
   get layout() {
     return this._data.layout;
   }
-  get image() {
-    return this._data.image;
+  get camera() {
+    return this._data.camera;
   }
   get markers() {
     return this._data.markers;
@@ -74,8 +85,9 @@ export class Manifest extends EventTarget {
   }
 
   setImageDimensions(width: number, height: number) {
-    if (width != this.image.pixelWidth || height != this.image.pixelHeight || Object.keys(this.markers).length < 4) {
-      const newMarkers = {
+    const calibrationMarkerCount = Object.keys(this.markers.calibration || {}).length;
+    if (width != this.camera.resolution.width || height != this.camera.resolution.height || calibrationMarkerCount < 4) {
+      const newCalibrationMarkers = {
         'rect-0': { x: 50, y: 50 },
         'rect-1': { x: 50, y: height - 50 },
         'rect-2': { x: width - 50, y: 50 },
@@ -86,32 +98,52 @@ export class Manifest extends EventTarget {
         new CustomEvent('rr-manifest-changed', {
           detail: {
             ...this._data,
-            image: { pixelWidth: width, pixelHeight: height },
-            markers: newMarkers,
+            camera: { ...this._data.camera, resolution: { width, height } },
+            markers: { ...this._data.markers, calibration: newCalibrationMarkers },
           },
         })
       );
     }
   }
 
-  setMarker(id: string, x: number, y: number) {
+  setMarker(category: MarkerCategory, id: string, x: number, y: number) {
     this.dispatchEvent(
       new CustomEvent('rr-manifest-changed', {
-        detail: { ...this._data, markers: { ...this._data.markers, [id]: { x, y } } },
+        detail: {
+          ...this._data,
+          markers: {
+            ...this._data.markers,
+            [category]: { ...this._data.markers[category], [id]: { x: Math.round(x), y: Math.round(y) } }
+          }
+        },
       })
     );
   }
 
   deleteMarker(id: string) {
-    // Remove marker with given id if it exists
-    if (!(id in this._data.markers)) {
-      return; // Marker doesn't exist, nothing to do
-    }
+    // Find which category the marker belongs to (detector or label only)
+    let targetCategory: MarkerCategory | null = null;
     
-    const { [id]: removed, ...newMarkers } = this._data.markers;
+    if (id in (this._data.markers.detector || {})) {
+      targetCategory = "detector";
+    } else if (id in (this._data.markers.label || {})) {
+      targetCategory = "label";
+    }
+
+    if (!targetCategory) {
+      return; // Marker doesn't exist in deletable categories, nothing to do
+    }
+
+    const { [id]: removed, ...newCategoryMarkers } = this._data.markers[targetCategory];
     this.dispatchEvent(
       new CustomEvent('rr-manifest-changed', {
-        detail: { ...this._data, markers: newMarkers }
+        detail: {
+          ...this._data,
+          markers: {
+            ...this._data.markers,
+            [targetCategory]: newCategoryMarkers
+          }
+        },
       })
     );
   }

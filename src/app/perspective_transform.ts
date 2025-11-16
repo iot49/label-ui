@@ -2,7 +2,7 @@ import cv, { type Mat } from "opencv-ts";
 import type { Manifest } from "./manifest";
 
 export function computePerspectiveTransform(manifest: Manifest): Mat {
-    const markers = manifest.markers;
+    const markers = manifest.markers.calibration;
 
     // Get the four corner points from the manifest
     const rect0 = markers['rect-0']; // top-left
@@ -20,11 +20,13 @@ export function computePerspectiveTransform(manifest: Manifest): Mat {
 
     // Destination points
     const size = manifest.layout.size;
+    const width = size.width ?? 1000; // Default fallback if undefined
+    const height = size.height ?? 1000; // Default fallback if undefined
     const dst = cv.matFromArray(4, 1, cv.CV_32FC2, [
         0, 0,
-        size.width, 0,
-        size.width, size.height,
-        0, size.height
+        width, 0,
+        width, height,
+        0, height
     ]);
 
     // Compute perspective transformation matrix

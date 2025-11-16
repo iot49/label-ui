@@ -69,11 +69,11 @@ export class RrCalibrate extends LitElement {
   private dragHandleId: string | null = null;
 
   render() {
-    if (Object.keys(this.manifest?.markers).length < 2) return html``;
+    if (Object.keys(this.manifest?.markers.calibration || {}).length < 2) return html``;
 
     // Calculate the SVG viewBox to match image dimensions
-    const imageWidth = this.manifest.image.pixelWidth;
-    const imageHeight = this.manifest.image.pixelHeight;
+    const imageWidth = this.manifest.camera.resolution.width;
+    const imageHeight = this.manifest.camera.resolution.height;
     const viewBox = `0 0 ${imageWidth} ${imageHeight}`;
 
     if (!SHOW_SPLIT_PANEL) {
@@ -145,7 +145,7 @@ export class RrCalibrate extends LitElement {
   }
 
   private rectTemplate(handles = true) {
-    const markers = this.manifest.markers;
+    const markers = this.manifest.markers["calibration"];
     const rect0 = markers['rect-0'];
     const rect1 = markers['rect-1'];
     const rect2 = markers['rect-2'];
@@ -195,7 +195,7 @@ export class RrCalibrate extends LitElement {
   private handleMouseMove = (event: MouseEvent) => {
     if (!this.dragHandleId) return;
     const screenCoords = this.toSVGPoint(event.clientX, event.clientY);
-    this.manifest.setMarker(this.dragHandleId, screenCoords.x, screenCoords.y);
+    this.manifest.setMarker("calibration", this.dragHandleId, screenCoords.x, screenCoords.y);
   };
 
   private handleMouseUp = () => {
