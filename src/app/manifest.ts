@@ -22,7 +22,7 @@ export interface Camera {
   model?: string;
 }
 
-export type MarkerCategory = "calibration" | "label";
+export type MarkerCategory = "calibration" | "detector" | "label";
 export type MarkerId = string;
 export type Markers = Record<MarkerCategory, Record<string, Marker>>;
 
@@ -54,7 +54,7 @@ export class Manifest extends EventTarget {
       version: 1,
       layout: { name: undefined, scale: 'HO', size: { width: undefined, height: undefined } },
       camera: { resolution: { width: 0, height: 0 } },
-      markers: { calibration: {}, label: {} },
+      markers: { calibration: {}, detector: {}, label: {} },
     };
 
     if (data) this._data = { ...this._data, ...data };
@@ -121,10 +121,12 @@ export class Manifest extends EventTarget {
   }
 
   deleteMarker(id: string) {
-    // Find which category the marker belongs to (label only)
+    // Find which category the marker belongs to (detector or label only)
     let targetCategory: MarkerCategory | null = null;
     
-    if (id in (this._data.markers.label || {})) {
+    if (id in (this._data.markers.detector || {})) {
+      targetCategory = "detector";
+    } else if (id in (this._data.markers.label || {})) {
       targetCategory = "label";
     }
 
