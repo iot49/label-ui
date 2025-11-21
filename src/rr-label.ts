@@ -54,7 +54,7 @@ export class RrLabel extends LitElement {
     return html`
       <svg id="svg" viewBox=${viewBox} @mousedown=${this.handleMouseDown} @mousemove=${this.handleMouseMove} @click=${this.handleClick}>
         <defs>
-          <symbol id="detector" width=${symbolSize} height=${symbolSize} viewBox="8 8 24 24" stroke="yellow">
+          <symbol id="detector" width=${symbolSize} height=${symbolSize} viewBox="8 8 24 24" stroke="lightgreen">
             <rect width="16" height="16" rx="3" ry="3" fill="white" fill-opacity="0.6" stroke="none" style="cursor: pointer;" />
             <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16" />
             <path
