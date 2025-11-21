@@ -1,7 +1,7 @@
 import { LitElement, html, css, svg } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import { consume } from '@lit/context';
-import { Manifest, manifestContext } from './app/manifest.ts';
+import { Manifest, manifestContext, type MarkerCategory } from './app/manifest.ts';
 
 @customElement('rr-label')
 export class RrLabel extends LitElement {
@@ -35,7 +35,7 @@ export class RrLabel extends LitElement {
   @property({ type: String })
   imageUrl: string | null = null;
 
-  private dragHandleId: string | null = null;
+  private dragHandle: { id: string, category: MarkerCategory } | null = null;
 
   @property({ attribute: false })
   activeTool: string | null = null;
@@ -94,18 +94,20 @@ export class RrLabel extends LitElement {
           </symbol>
         </defs>
         <image id="image" href=${this.imageUrl} x="0" y="0" width=${imageWidth} height=${imageHeight}></image>
-        ${this.markerTemplate()}
+        ${this.markerTemplate("label")}
+        ${this.markerTemplate("detector")}
       </svg>
     `;
   }
 
-  private markerTemplate() {
+
+  private markerTemplate(category: MarkerCategory) {
     return svg`
-      ${Object.entries(this.manifest.markers['label']).map(([markerId, pos]) => {
+      ${Object.entries(this.manifest.markers[category]).map(([markerId, pos]) => {
         const lastDash = markerId.lastIndexOf('-');
         if (lastDash < 0) return svg``;
         const href = markerId.slice(0, lastDash);
-        return svg`<use id=${markerId} href="#${href}" x=${pos.x} y=${pos.y}></use>`;
+        return svg`<use id=${markerId} class=${category} href="#${href}" x=${pos.x} y=${pos.y}></use>`;
       })}
     `;
   }
@@ -121,38 +123,41 @@ export class RrLabel extends LitElement {
 
   private handleClick = (event: MouseEvent) => {
     // do not create label after dragging
-    if (this.dragHandleId === null) {
+    if (this.dragHandle === null) {
       // create a new marker
-      if (!this.activeTool || this.activeTool === 'delete') return;
-      console.log('create marker', this.activeTool);
-      const markers = this.manifest.markers['label'] || {};
-      let id = this.activeTool;
+      const tool = this.activeTool;
+      if (!tool || tool === 'delete') return;
+      const category = tool === 'detector' ? 'detector' : 'label';
+      const markers = this.manifest.markers[category] || {};
+      let id = undefined;
       for (let i = Object.keys(markers).length; true; i++) {
-        id = `${this.activeTool}-${i}`;
+        id = `${tool}-${i}`;
         if (!(id in markers)) break;
       }
       const screenCoords = this.toSVGPoint(event.clientX, event.clientY);
-      this.manifest.setMarker('label', id, screenCoords.x, screenCoords.y);
+      this.manifest.setMarker(category, id, screenCoords.x, screenCoords.y);
     } else {
       // finished dragging
-      this.dragHandleId = null;
+      this.dragHandle = null;
     }
   };
 
   private handleMouseDown = (event: MouseEvent) => {
     const target = event.target as Element;
-    if (!target || !target.id || !(target.id in (this.manifest.markers['label'] || {}))) return;
+    if (!target || !target.id) return;
     if (this.activeTool === 'delete') {
       this.manifest.deleteMarker(target.id);
     } else {
-      this.dragHandleId = target.id;
+      const classList = target.classList;
+      if (!classList.contains('detector') && !classList.contains('label')) return;
+      const category = classList.contains('detector') ? 'detector' : 'label';
+      this.dragHandle = { id: target.id, category: category };
     }
   };
 
   private handleMouseMove = (event: MouseEvent) => {
-    if (!this.dragHandleId) return;
+    if (!this.dragHandle) return;
     const screenCoords = this.toSVGPoint(event.clientX, event.clientY);
-    console.log('handleMouseMove setMarker', this.dragHandleId);
-    this.manifest.setMarker('label', this.dragHandleId, screenCoords.x, screenCoords.y);
+    this.manifest.setMarker(this.dragHandle.category, this.dragHandle.id, screenCoords.x, screenCoords.y);
   };
 }

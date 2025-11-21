@@ -233,7 +233,6 @@ export class RrMain extends LitElement {
         // save .r49
         const content = await zip.generateAsync({ type: 'blob' });
         const filename = `${this.manifest.layout.name}.r49`;
-        console.log("save", filename, this.manifest.toJSON());
         saveAs(content, filename);
         break;
       }
