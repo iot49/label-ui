@@ -160,7 +160,9 @@ export class RrMain extends LitElement {
         <span class="header-text"> ${this.manifest.layout.name} </span>
         <span class="header-text"> ${this.manifest.layout.scale} </span>
         ${this.manifest.layout.size.width && this.manifest.layout.size.height
-          ? html`<span class="header-text"> ${this.manifest.layout.size.width} x ${this.manifest.layout.size.height} mm </span>`
+          ? html`
+              <span class="header-text">${this.manifest.layout.size.width} x ${this.manifest.layout.size.height} mm</span>
+              <span class="header-text">${this.manifest.dots_per_track} dpt</span>`
           : html``}
         <sl-icon-button
           name="gear"
@@ -282,8 +284,8 @@ export class RrMain extends LitElement {
       // hence we keep existing values (that still may apply) in manifest, updating only those that clearly need change
 
       // labels do not apply to different image (modification is not responsive, but name change below is)
-      this.manifest.markers["detector"] = {};
-      this.manifest.markers["label"] = {};
+      this.manifest.markers['detector'] = {};
+      this.manifest.markers['label'] = {};
 
       // layout name defaults to file name
       const name = file.name.substring(0, file.name.lastIndexOf('.'));

@@ -75,6 +75,19 @@ export class Manifest extends EventTarget {
   get scale(): number {
     return Scale2Number[this._data.layout.scale];
   }
+  get dots_per_track(): number {
+    if (!this._data.layout.size.width && !this._data.layout.size.height) return -1;
+    // Calculate dpt based on top width of calibration rectangle. 
+    // Inaccurate if camera at an angle.
+    const standard_gauge_mm = 1435;
+    const [r0, r1] = [this._data.markers.calibration['rect-0'], this._data.markers.calibration['rect-2']];
+    console.log(this._data.markers.calibration);
+    const w_px = Math.sqrt((r1.x - r0.x) ** 2 + (r1.y - r0.y) ** 2);
+    const w_mm = this._data.layout.size.width;
+    const track_mm = standard_gauge_mm / this.scale;
+    const px_per_mm = w_px / w_mm!;
+    return Math.round(px_per_mm * track_mm);
+  }
 
   setLayout(layout: Layout) {
     this.dispatchEvent(
