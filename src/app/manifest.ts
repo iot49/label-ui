@@ -41,6 +41,8 @@ export const Scale2Number = {
   Z: 96,
 };
 
+export const standard_gauge_mm = 1435; // Standard gauge in millimeters
+
 type ValidScales = keyof typeof Scale2Number;
 
 export class Manifest extends EventTarget {
@@ -79,7 +81,6 @@ export class Manifest extends EventTarget {
     if (!this._data.layout.size.width && !this._data.layout.size.height) return -1;
     // Calculate dpt based on top width of calibration rectangle. 
     // Inaccurate if camera at an angle.
-    const standard_gauge_mm = 1435;
     const [r0, r1] = [this._data.markers.calibration['rect-0'], this._data.markers.calibration['rect-2']];
     console.log(this._data.markers.calibration);
     const w_px = Math.sqrt((r1.x - r0.x) ** 2 + (r1.y - r0.y) ** 2);
