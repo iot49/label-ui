@@ -1,5 +1,4 @@
 import './rr-main.ts';
-import './rr-calibrate.ts';
 import './rr-label.ts';
 import './rr-settings.ts';
 

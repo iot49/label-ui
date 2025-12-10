@@ -32,7 +32,17 @@ export class RrMain extends LitElement {
   }
 
   @state()
-  imageUrl: string | undefined = undefined;
+  imageUrls: string[] = [];
+
+  @state()
+  currentImageIndex: number = -1;
+
+  get imageUrl(): string | undefined {
+    if (this.currentImageIndex >= 0 && this.currentImageIndex < this.imageUrls.length) {
+      return this.imageUrls[this.currentImageIndex];
+    }
+    return undefined;
+  }
 
   @state()
   activeTool: string | null = null;
@@ -110,6 +120,89 @@ export class RrMain extends LitElement {
       align-items: center;
       height: var(--sl-input-height-medium);
     }
+
+    /* Thumbnail bar styles */
+    .thumbnails {
+      height: 70px;
+      display: flex;
+      align-items: center;
+      padding: 0 0.5em;
+      gap: 0.5em;
+      overflow-x: auto;
+      background-color: var(--sl-color-neutral-100);
+      border-bottom: 1px solid var(--sl-color-neutral-200);
+      flex-shrink: 0;
+    }
+
+    .thumbnail-wrapper {
+      position: relative;
+      display: inline-block;
+    }
+
+    .thumbnail {
+      width: 60px;
+      height: 60px;
+      border: 2px solid transparent;
+      border-radius: 4px;
+      cursor: pointer;
+      object-fit: contain;
+      background-color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .thumbnail.active {
+      border-color: var(--sl-color-primary-600);
+    }
+
+    .delete-btn {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      width: 20px;
+      height: 20px;
+      background-color: var(--sl-color-danger-600);
+      color: white;
+      border-radius: 50%;
+      display: none; /* Hidden by default */
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 12px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .thumbnail-wrapper:hover .delete-btn {
+      display: flex; /* Show on hover */
+    }
+
+    .add-image-btn {
+      width: 60px;
+      height: 60px;
+      border: 2px dashed var(--sl-color-neutral-400);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--sl-color-neutral-400);
+      font-size: 2em;
+    }
+
+    .add-image-btn:hover {
+      border-color: var(--sl-color-primary-600);
+      color: var(--sl-color-primary-600);
+    }
+
+    /* Update main layout to accommodate thumbnail bar */
+    .main-content {
+      display: flex;
+      flex-direction: column;
+      flex-grow: 1;
+      overflow: hidden;
+    }
+
   `;
 
   connectedCallback() {
@@ -141,10 +234,36 @@ export class RrMain extends LitElement {
     `;
   }
 
+  private _thumbnailBarTemplate() {
+    return html`
+      <div class="thumbnails">
+        ${this.imageUrls.map(
+          (url, index) => html`
+          <div class="thumbnail-wrapper">
+            <img
+              src="${url}"
+              class="thumbnail ${index === this.currentImageIndex ? 'active' : ''}"
+              @click=${() => {
+                this.currentImageIndex = index;
+              }}
+            />
+            <div class="delete-btn" @click=${(e: Event) => this._handleDeleteImage(e, index)}>
+              <sl-icon name="x-lg"></sl-icon>
+            </div>
+          </div>
+          `
+        )}
+        
+        <div class="add-image-btn" @click=${this._handleAddImageClick}>
+          <sl-icon name="plus-lg"></sl-icon>
+        </div>
+      </div>
+    `;
+  }
+
   private _labelToolsTemplate() {
     const disabled = this.imageUrl === undefined || this.manifest.layout.size.width === undefined || this.manifest.layout.size.height === undefined;
     return html` <div class="toolbar-group">
-      ${this._renderToolButton('Detect Occupancy', 'question-circle', 'detector', disabled)}
       ${this._renderToolButton('Label as Track', 'sign-railroad', 'track', disabled)}
       ${this._renderToolButton('Label as Train Car', 'truck-front', 'train', disabled)}
       ${this._renderToolButton('Label as Train Front/Back', 'arrow-bar-right', 'train-end', disabled)}
@@ -182,13 +301,16 @@ export class RrMain extends LitElement {
       </header>
       <div class="container">
         <nav>${this._fileToolsTemplate()} ${this._labelToolsTemplate()}</nav>
-        <main>
-          ${this.imageUrl
-            ? this.activeTool && this.activeTool !== 'calibrate'
-              ? html`<rr-label .imageUrl=${this.imageUrl} .activeTool=${this.activeTool}></rr-label>`
-              : html`<rr-calibrate .imageUrl=${this.imageUrl}></rr-calibrate>`
-            : html`<p>&nbsp;&nbsp;&nbsp;Please upload an image or open a <em>.r49</em> file.</p>`}
-        </main>
+        <div class="main-content">
+          ${this._thumbnailBarTemplate()}
+          <main>
+            ${this.imageUrl
+              ? this.activeTool && this.activeTool !== 'calibrate'
+                ? html`<rr-label .imageUrl=${this.imageUrl} .imageIndex=${this.currentImageIndex} .activeTool=${this.activeTool}></rr-label>`
+                : html`<rr-label .imageUrl=${this.imageUrl} .imageIndex=${this.currentImageIndex} .activeTool=${this.activeTool}></rr-label>`
+              : html`<p>&nbsp;&nbsp;&nbsp;Please upload an image or open a <em>.r49</em> file.</p>`}
+          </main>
+        </div>
       </div>
       ${this._settingsDialogTemplate()}
     `;
@@ -214,27 +336,47 @@ export class RrMain extends LitElement {
         this.activeTool = null; // Clear active tool when uploading new image
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.r49, image/jpeg, image/png';
+        input.accept = '.r49,application/zip,.zip';
         input.onchange = this._handleChooseFile.bind(this);
         input.click();
         break;
       }
       case 'save': {
-        if (!this.imageUrl) return;
+        if (this.imageUrls.length === 0) return;
 
         const zip = new JSZip();
-        // create image file
-        const mimeType = this.imageUrl.split(';')[0].split(':')[1]; // Gets "image/jpeg"
-        const extension = mimeType.split('/')[1]; // Gets "jpeg"
-        const imageName = `image.${extension}`;
-        zip.file(imageName, this.imageUrl.split(',')[1], { base64: true });
+        const imageFilenames: string[] = [];
+
+        // create image files
+        this.imageUrls.forEach((url, i) => {
+           const mimeType = url.split(';')[0].split(':')[1]; // Gets "image/jpeg"
+           const extension = mimeType.split('/')[1]; // Gets "jpeg"
+           const imageName = `image-${i}.${extension}`;
+           zip.file(imageName, url.split(',')[1], { base64: true });
+           imageFilenames.push(imageName);
+        });
+
+        // update manifest with image list
+        const images = imageFilenames.map((filename, index) => {
+            // If the image already existed in the manifest, try to preserve its labels
+            // Simple heuristic: if we are saving the same count of images, map 1-to-1
+            // Use existing manifest data if available for this index
+            const existingImage = this.manifest.images[index];
+            return {
+                filename: filename,
+                labels: existingImage ? existingImage.labels : {}
+            };
+        });
+        
+        this.manifest.setImages(images);
 
         // create manifest.json
         zip.file('manifest.json', this.manifest.toJSON());
 
         // save .r49
         const content = await zip.generateAsync({ type: 'blob' });
-        const filename = `${this.manifest.layout.name}.r49`;
+        const name = this.manifest.layout.name || 'layout';
+        const filename = `${name}.r49`;
         saveAs(content, filename);
         break;
       }
@@ -249,27 +391,38 @@ export class RrMain extends LitElement {
     const reader = new FileReader();
     reader.onload = async (e) => {
       const zip = await JSZip.loadAsync(e.target?.result as ArrayBuffer);
-      let imageDataUrl: Promise<string> | undefined;
+      let imagePromiseList: Promise<string>[] = [];
       let manifestFileContent: Promise<string> | undefined;
 
       // read image and manifest ...
       zip.forEach((relativePath, zipEntry) => {
-        if (relativePath.startsWith('image.')) {
+        if (relativePath.startsWith('image')) {
           // Extract extension from filename (e.g., "image.jpeg" -> "jpeg")
           const extension = relativePath.split('.').slice(1).join('.');
-          imageDataUrl = zipEntry.async('base64').then((data) => {
+          const imagePromise = zipEntry.async('base64').then((data) => {
             const mimeType = `image/${extension}`;
             return `data:${mimeType};base64,${data}`;
           });
+          imagePromiseList.push(imagePromise);
         } else if (relativePath === 'manifest.json') {
           manifestFileContent = zipEntry.async('string');
         }
       });
 
       // update imageUrl & manifest
-      if (imageDataUrl && manifestFileContent) {
-        this.imageUrl = await imageDataUrl;
-        this.manifest = Manifest.fromJSON(await manifestFileContent);
+      if (imagePromiseList.length > 0 && manifestFileContent) {
+        // R49 load replaces everything
+        try {
+            const manifestJson = await manifestFileContent;
+            const newManifest = Manifest.fromJSON(manifestJson);
+            
+            this.imageUrls = await Promise.all(imagePromiseList);
+            this.currentImageIndex = 0;
+            this.manifest = newManifest;
+        } catch (e) {
+            alert(`Error loading file: ${(e as Error).message}`);
+            console.error(e);
+        }
       } else {
         console.error('Invalid .r49 file: missing image or manifest.json');
       }
@@ -283,21 +436,43 @@ export class RrMain extends LitElement {
       // when labeleing, frequently multiple images with identical dimensions are loaded
       // hence we keep existing values (that still may apply) in manifest, updating only those that clearly need change
 
-      // labels do not apply to different image (modification is not responsive, but name change below is)
-      this.manifest.markers['detector'] = {};
-      this.manifest.markers['label'] = {};
-
       // layout name defaults to file name
       const name = file.name.substring(0, file.name.lastIndexOf('.'));
-      this.manifest.setLayout({ ...this.manifest.layout, name });
-      this.imageUrl = e.target?.result as string;
+      const newImageUrl = e.target?.result as string;
+      if (this.imageUrls.includes(newImageUrl)) {
+        alert('This image has already been loaded.');
+        return;
+      }
 
       // Create an Image object to get actual dimensions
       const img = new Image();
       img.onload = () => {
+        // Validation: Only if we already have images
+        if (this.imageUrls.length > 0) {
+             const currentWidth = this.manifest.camera.resolution.width;
+             const currentHeight = this.manifest.camera.resolution.height;
+             if (img.width !== currentWidth || img.height !== currentHeight) {
+                alert(`Error: New image dimensions (${img.width}x${img.height}) must match existing images (${currentWidth}x${currentHeight}).`);
+                return;
+             }
+        }
+
+        this.manifest.setLayout({ ...this.manifest.layout, name });
+        // This will set/update resolution. If it was empty, it sets it. If it was same, it does nothing/idempotent.
         this.manifest.setImageDimensions(img.width, img.height);
+        
+        this.imageUrls = [...this.imageUrls, newImageUrl];
+        const newIndex = this.imageUrls.length - 1;
+        this.currentImageIndex = newIndex;
+
+        // Sync manifest: Add new empty image entry
+        // We use a placeholder filename which will be overwritten on save, 
+        // but ensures an object exists for labels to attach to.
+        const currentImages = this.manifest.images;
+        const newImageEntry = { filename: `image-${newIndex}`, labels: {} }; 
+        this.manifest.setImages([...currentImages, newImageEntry]);
       };
-      img.src = this.imageUrl;
+      img.src = newImageUrl;
     };
     reader.readAsDataURL(file);
   }
@@ -306,7 +481,7 @@ export class RrMain extends LitElement {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files.length > 0) {
       const file = input.files[0];
-      file.name.endsWith('.r49') ? this._load_r49(file) : this._load_imgfile(file);
+      file.name.toLowerCase().endsWith('.r49') ? this._load_r49(file) : this._load_imgfile(file);
       // Activate calibrate tool visually
       this.activeTool = 'calibrate';
     }
@@ -325,5 +500,47 @@ export class RrMain extends LitElement {
         <rr-settings></rr-settings>
       </sl-dialog>
     `;
+  }
+
+  private _handleAddImageClick() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg, image/png';
+    input.onchange = (e) => this._handleChooseFile(e);
+    input.click();
+  }
+
+  private _handleDeleteImage(e: Event, index: number) {
+    e.stopPropagation(); // Prevent selecting the image when deleting
+    
+    // Remove image from array
+    const newImageUrls = [...this.imageUrls];
+    newImageUrls.splice(index, 1);
+    this.imageUrls = newImageUrls;
+    
+    // Sync manifest: Remove image entry
+    const currentImages = [...this.manifest.images];
+    if (index < currentImages.length) {
+        currentImages.splice(index, 1);
+        this.manifest.setImages(currentImages);
+    }
+
+    // Update index if needed
+    if (this.currentImageIndex >= this.imageUrls.length) {
+      this.currentImageIndex = this.imageUrls.length - 1;
+    } else if (this.currentImageIndex === index) {
+      // If we deleted the current image, safety check (handled by length check above mostly, but good for clarity)
+       this.currentImageIndex = Math.max(0, this.currentImageIndex - 1);
+       if (this.imageUrls.length === 1) this.currentImageIndex = 0;
+    }
+    
+    // If no images left, reset
+    if (this.imageUrls.length === 0) {
+      this.currentImageIndex = -1;
+    }
+    
+    // Update manifest (this will need to be more robust in Step 6, but for now we sync the list)
+    // Note: In Step 6 we will have a proper structure, for now just syncing the list of what will be saved
+    // The actual manifest.images update happens on save currently, so this state change is sufficient for UI
   }
 }

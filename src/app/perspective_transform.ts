@@ -2,7 +2,7 @@ import cv, { type Mat } from "opencv-ts";
 import type { Manifest } from "./manifest";
 
 export function computePerspectiveTransform(manifest: Manifest): Mat {
-    const markers = manifest.markers.calibration;
+    const markers = manifest.calibration;
 
     // Get the four corner points from the manifest
     const rect0 = markers['rect-0']; // top-left

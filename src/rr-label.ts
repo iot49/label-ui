@@ -35,6 +35,9 @@ export class RrLabel extends LitElement {
   @property({ type: String })
   imageUrl: string | null = null;
 
+  @property({ type: Number })
+  imageIndex: number = -1;
+
   private dragHandle: { id: string, category: MarkerCategory } | null = null;
 
   @property({ attribute: false })
@@ -54,13 +57,6 @@ export class RrLabel extends LitElement {
     return html`
       <svg id="svg" viewBox=${viewBox} @mousedown=${this.handleMouseDown} @mousemove=${this.handleMouseMove} @click=${this.handleClick}>
         <defs>
-          <symbol id="detector" width=${symbolSize} height=${symbolSize} viewBox="8 8 24 24" stroke="yellow">
-            <rect width="16" height="16" rx="3" ry="3" fill="white" fill-opacity="0.6" stroke="none" style="cursor: pointer;" />
-            <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14m0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16" />
-            <path
-              d="M5.255 5.786a.237.237 0 0 0 .241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 0 0 .25.246h.811a.25.25 0 0 0 .25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286m1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94"
-            />
-          </symbol>
           <symbol id="track" width=${symbolSize} height=${symbolSize} viewBox="8 8 24 24" stroke="yellow">
             <rect width="16" height="16" rx="3" ry="3" fill="white" fill-opacity="0.6" stroke="none" style="cursor: pointer;" />
             <path
@@ -92,23 +88,62 @@ export class RrLabel extends LitElement {
               d="M8 15a.5.5 0 0 1-.5-.5v-13a.5.5 0 0 1 1 0v13a.5.5 0 0 1-.5.5M0 8a.5.5 0 0 1 .5-.5h3.793L3.146 6.354a.5.5 0 1 1 .708-.708l2 2a.5.5 0 0 1 0 .708l-2 2a.5.5 0 0 1-.708-.708L4.293 8.5H.5A.5.5 0 0 1 0 8m11.707.5 1.147 1.146a.5.5 0 0 1-.708.708l-2-2a.5.5 0 0 1 0-.708l2-2a.5.5 0 0 1 .708.708L11.707 7.5H15.5a.5.5 0 0 1 0 1z"
             />
           </symbol>
+          <symbol id="drag-handle">
+            <!-- Visible dot -->
+            <circle r="${10}" fill="coral" />
+            <!-- Invisible larger interaction circle -->
+            <circle r="${20}" fill="transparent" style="cursor: pointer;" />
+          </symbol>
         </defs>
         <image id="image" href=${this.imageUrl} x="0" y="0" width=${imageWidth} height=${imageHeight}></image>
         ${this.markerTemplate("label")}
-        ${this.markerTemplate("detector")}
+        ${this.imageIndex === 0 ? this.rectTemplate() : svg``}
       </svg>
     `;
   }
 
 
   private markerTemplate(category: MarkerCategory) {
+    if (!this.manifest.images[this.imageIndex]) return svg``;
+    const markers = this.manifest.images[this.imageIndex].labels || {};
     return svg`
-      ${Object.entries(this.manifest.markers[category]).map(([markerId, pos]) => {
-        const lastDash = markerId.lastIndexOf('-');
-        if (lastDash < 0) return svg``;
-        const href = markerId.slice(0, lastDash);
-        return svg`<use id=${markerId} class=${category} href="#${href}" x=${pos.x} y=${pos.y}></use>`;
+      ${Object.entries(markers).map(([markerId, marker]) => {
+        // marker.type is 'track', 'train', etc.
+        return svg`<use id=${markerId} class=${category} href="#${marker.type}" x=${marker.x} y=${marker.y}></use>`;
       })}
+    `;
+  }
+
+  private rectTemplate(handles = true) {
+    if (Object.keys(this.manifest.calibration || {}).length < 4) return svg``;
+    
+    const bounds = this.manifest.calibration;
+    const rect0 = bounds['rect-0'];
+    const rect1 = bounds['rect-1'];
+    const rect2 = bounds['rect-2'];
+    const rect3 = bounds['rect-3'];
+
+    const points = `${rect0.x},${rect0.y} ${rect1.x},${rect1.y} ${rect3.x},${rect3.y} ${rect2.x},${rect2.y}`;
+
+    return svg`
+      <polygon
+        points=${points}
+        fill="none"
+        stroke="coral"
+        stroke-width="3"
+        vector-effect="non-scaling-stroke"
+        style="pointer-events: none;" 
+      />
+      ${
+        handles
+          ? svg`
+            <use id="rect-0" class="calibration" href="#drag-handle" x=${rect0.x} y=${rect0.y} />
+            <use id="rect-1" class="calibration" href="#drag-handle" x=${rect1.x} y=${rect1.y} />
+            <use id="rect-2" class="calibration" href="#drag-handle" x=${rect2.x} y=${rect2.y} />
+            <use id="rect-3" class="calibration" href="#drag-handle" x=${rect3.x} y=${rect3.y} />
+          `
+          : svg``
+      }
     `;
   }
 
@@ -126,16 +161,15 @@ export class RrLabel extends LitElement {
     if (this.dragHandle === null) {
       // create a new marker
       const tool = this.activeTool;
-      if (!tool || tool === 'delete') return;
-      const category = tool === 'detector' ? 'detector' : 'label';
-      const markers = this.manifest.markers[category] || {};
-      let id = undefined;
-      for (let i = Object.keys(markers).length; true; i++) {
-        id = `${tool}-${i}`;
-        if (!(id in markers)) break;
-      }
+      // Cannot create with delete tool or calibrate tool. 
+      // Calibrate tool is effectively "move only" for calibration handles.
+      if (!tool || tool === 'delete' || tool === 'calibrate') return; 
+      
+      const category: MarkerCategory = 'label';
+      const id = crypto.randomUUID();
+      
       const screenCoords = this.toSVGPoint(event.clientX, event.clientY);
-      this.manifest.setMarker(category, id, screenCoords.x, screenCoords.y);
+      this.manifest.setMarker(category, id, screenCoords.x, screenCoords.y, tool, this.imageIndex);
     } else {
       // finished dragging
       this.dragHandle = null;
@@ -145,19 +179,39 @@ export class RrLabel extends LitElement {
   private handleMouseDown = (event: MouseEvent) => {
     const target = event.target as Element;
     if (!target || !target.id) return;
+    
+    const classList = target.classList;
+
     if (this.activeTool === 'delete') {
-      this.manifest.deleteMarker(target.id);
+      if (classList.contains('label')) {
+        this.manifest.deleteMarker('label', target.id, this.imageIndex);
+      }
     } else {
-      const classList = target.classList;
-      if (!classList.contains('detector') && !classList.contains('label')) return;
-      const category = classList.contains('detector') ? 'detector' : 'label';
-      this.dragHandle = { id: target.id, category: category };
+      if (classList.contains('label')) {
+        this.dragHandle = { id: target.id, category: 'label' };
+      } else if (classList.contains('calibration')) {
+        this.dragHandle = { id: target.id, category: 'calibration' };
+      }
     }
   };
 
   private handleMouseMove = (event: MouseEvent) => {
     if (!this.dragHandle) return;
     const screenCoords = this.toSVGPoint(event.clientX, event.clientY);
-    this.manifest.setMarker(this.dragHandle.category, this.dragHandle.id, screenCoords.x, screenCoords.y);
+    
+    if (this.dragHandle.category === 'calibration') {
+         this.manifest.setMarker('calibration', this.dragHandle.id, screenCoords.x, screenCoords.y);
+    } else {
+        // Preserving the type is tricky here since we don't have it locally easily 
+        // unless we look it up, but setMarker merges so type should be preserved if passed undefined
+        // However, setMarker signature currently expects type. Let's look it up.
+        let type = 'track';
+        if (this.manifest.images[this.imageIndex] && this.manifest.images[this.imageIndex].labels[this.dragHandle.id]) {
+            type = this.manifest.images[this.imageIndex].labels[this.dragHandle.id].type;
+        }
+        
+        this.manifest.setMarker(this.dragHandle.category, this.dragHandle.id, screenCoords.x, screenCoords.y, type, this.imageIndex);
+    }
   };
 }
+

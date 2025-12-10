@@ -2,11 +2,30 @@ import { createContext } from '@lit/context';
 
 export const manifestContext = createContext<Manifest>('manifest');
 
+export type MarkerCategory = 'calibration' | 'label';
+
+export type UUID = string;
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface Marker extends Point {
+  type: string;
+}
+
+export interface Image {
+  filename: string;
+  labels: Record<UUID, Marker>;
+}
+
 export interface ManifestData {
   version: number;
   layout: Layout;
   camera: Camera;
-  markers: Markers;
+  calibration: Record<string, Point>;
+  images: Image[];
 }
 
 export interface Layout {
@@ -20,15 +39,6 @@ export interface Layout {
 export interface Camera {
   resolution: { width: number; height: number };
   model?: string;
-}
-
-export type MarkerCategory = "calibration" | "detector" | "label";
-export type MarkerId = string;
-export type Markers = Record<MarkerCategory, Record<string, Marker>>;
-
-export interface Marker {
-  x: number;
-  y: number;
 }
 
 export const Scale2Number = {
@@ -46,18 +56,16 @@ export const standard_gauge_mm = 1435; // Standard gauge in millimeters
 type ValidScales = keyof typeof Scale2Number;
 
 export class Manifest extends EventTarget {
-  private _data!: ManifestData;
+  private _data: ManifestData = {
+    version: 2,
+    layout: { name: undefined, scale: 'HO', size: { width: undefined, height: undefined } },
+    camera: { resolution: { width: 0, height: 0 } },
+    calibration: {},
+    images: [],
+  };
 
   constructor(data?: Partial<ManifestData>) {
     super();
-
-    // Initialize _data first
-    this._data = {
-      version: 1,
-      layout: { name: undefined, scale: 'HO', size: { width: undefined, height: undefined } },
-      camera: { resolution: { width: 0, height: 0 } },
-      markers: { calibration: {}, detector: {}, label: {} },
-    };
 
     if (data) this._data = { ...this._data, ...data };
   }
@@ -71,18 +79,20 @@ export class Manifest extends EventTarget {
   get camera() {
     return this._data.camera;
   }
-  get markers() {
-    return this._data.markers;
+  get calibration() {
+    return this._data.calibration;
+  }
+  get images() {
+    return this._data.images;
   }
   get scale(): number {
     return Scale2Number[this._data.layout.scale];
   }
-  get dots_per_track(): number {
+  get dots_per_track(): number { 
     if (!this._data.layout.size.width && !this._data.layout.size.height) return -1;
     // Calculate dpt based on top width of calibration rectangle. 
-    // Inaccurate if camera at an angle.
-    const [r0, r1] = [this._data.markers.calibration['rect-0'], this._data.markers.calibration['rect-2']];
-    console.log(this._data.markers.calibration);
+    // This is valid even if the rectangle is rotated as long as the track is parallel to the top edge.
+    const [r0, r1] = [this._data.calibration['rect-0'], this._data.calibration['rect-2']];
     const w_px = Math.sqrt((r1.x - r0.x) ** 2 + (r1.y - r0.y) ** 2);
     const w_mm = this._data.layout.size.width;
     const track_mm = standard_gauge_mm / this.scale;
@@ -99,7 +109,7 @@ export class Manifest extends EventTarget {
   }
 
   setImageDimensions(width: number, height: number) {
-    const calibrationMarkerCount = Object.keys(this.markers.calibration || {}).length;
+    const calibrationMarkerCount = Object.keys(this.calibration || {}).length;
     if (width != this.camera.resolution.width || height != this.camera.resolution.height || calibrationMarkerCount < 4) {
       const newCalibrationMarkers = {
         'rect-0': { x: 50, y: 50 },
@@ -113,53 +123,69 @@ export class Manifest extends EventTarget {
           detail: {
             ...this._data,
             camera: { ...this._data.camera, resolution: { width, height } },
-            markers: { ...this._data.markers, calibration: newCalibrationMarkers },
+            calibration: newCalibrationMarkers,
           },
         })
       );
     }
   }
 
-  setMarker(category: MarkerCategory, id: string, x: number, y: number) {
+  setImages(images: Image[]) {
     this.dispatchEvent(
       new CustomEvent('rr-manifest-changed', {
-        detail: {
-          ...this._data,
-          markers: {
-            ...this._data.markers,
-            [category]: { ...this._data.markers[category], [id]: { x: Math.round(x), y: Math.round(y) } }
-          }
-        },
+        detail: { ...this._data, images },
       })
     );
   }
 
-  deleteMarker(id: string) {
-    // Find which category the marker belongs to (detector or label only)
-    let targetCategory: MarkerCategory | null = null;
-    
-    if (id in (this._data.markers.detector || {})) {
-      targetCategory = "detector";
-    } else if (id in (this._data.markers.label || {})) {
-      targetCategory = "label";
-    }
+  setMarker(category: MarkerCategory, id: string, x: number, y: number, type?: string, imageIndex: number = 0) {
+    if (category === 'calibration') {
+      const calibration = { ...this._data.calibration, [id]: { x: Math.round(x), y: Math.round(y) } };
+      this.dispatchEvent(
+        new CustomEvent('rr-manifest-changed', {
+          detail: { ...this._data, calibration },
+        })
+      );
+    } else if (category === 'label') {
+        const image = this._data.images[imageIndex];
+        if (!image) return; // Should not happen if index is valid
 
-    if (!targetCategory) {
-      return; // Marker doesn't exist in deletable categories, nothing to do
-    }
+        const labels = { ...image.labels, [id]: { x: Math.round(x), y: Math.round(y), type: type || 'track' } };
+        const newImages = [...this._data.images];
+        newImages[imageIndex] = { ...image, labels };
 
-    const { [id]: removed, ...newCategoryMarkers } = this._data.markers[targetCategory];
-    this.dispatchEvent(
-      new CustomEvent('rr-manifest-changed', {
-        detail: {
-          ...this._data,
-          markers: {
-            ...this._data.markers,
-            [targetCategory]: newCategoryMarkers
-          }
-        },
-      })
-    );
+        this.dispatchEvent(
+          new CustomEvent('rr-manifest-changed', {
+            detail: { ...this._data, images: newImages },
+          })
+        );
+    }
+  }
+
+  deleteMarker(category: MarkerCategory, id: string, imageIndex: number = 0) {
+    if (category === 'calibration') {
+        // Calibration markers generally aren't deleted individually via this method in this app flow usually, 
+        // but if needed:
+        const { [id]: deleted, ...calibration } = this._data.calibration;
+        this.dispatchEvent(
+            new CustomEvent('rr-manifest-changed', {
+            detail: { ...this._data, calibration },
+            })
+        );
+    } else if (category === 'label') {
+        const image = this._data.images[imageIndex];
+        if (!image) return;
+
+        const { [id]: deleted, ...labels } = image.labels;
+        const newImages = [...this._data.images];
+        newImages[imageIndex] = { ...image, labels };
+
+        this.dispatchEvent(
+            new CustomEvent('rr-manifest-changed', {
+            detail: { ...this._data, images: newImages },
+            })
+        );
+    }
   }
 
   toJSON(): string {
@@ -168,6 +194,9 @@ export class Manifest extends EventTarget {
 
   static fromJSON(json: string): Manifest {
     const data = JSON.parse(json);
+    if (data.version !== 2) {
+      throw new Error(`Unsupported manifest version: ${data.version}. Application only supports version 2.`);
+    }
     return new Manifest(data);
   }
 }
